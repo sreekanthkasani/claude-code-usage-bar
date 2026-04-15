@@ -21,6 +21,16 @@ from .progress import format_status_line
 # Suppress log output
 logging.basicConfig(level=logging.ERROR)
 
+_ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*m')
+
+def _right_align(line: str) -> str:
+    """Right-align the status line within the current terminal width."""
+    import shutil
+    visible = _ANSI_ESCAPE.sub('', line)
+    term_width = shutil.get_terminal_size(fallback=(200, 24)).columns
+    pad = max(0, term_width - len(visible))
+    return ' ' * pad + line
+
 def try_original_analysis() -> Optional[Dict[str, Any]]:
     """Try to use the installed claude-monitor package"""
     try:
@@ -765,28 +775,18 @@ def main(json_output: bool = False,
                 diff = datetime.fromtimestamp(resets_at, tz=timezone.utc) - datetime.now(timezone.utc)
                 total_min = max(0, int(diff.total_seconds() / 60))
                 minutes_to_reset = total_min
-                hours, mins = total_min // 60, total_min % 60
-                if hours > 0:
-                    reset_time = f"{hours}h{mins:02d}m"
-                else:
-                    reset_time = f"{mins}m"
+                # Show actual expiry day + time instead of countdown
+                expiry_dt = datetime.fromtimestamp(resets_at).astimezone()
+                reset_time = expiry_dt.strftime("%a %H:%M")
             else:
                 reset_time = "--"
                 minutes_to_reset = None
 
             resets_at_7d = stdin_data.get('rate_limit_7d_resets_at')
             if resets_at_7d:
-                diff_7d = datetime.fromtimestamp(resets_at_7d, tz=timezone.utc) - datetime.now(timezone.utc)
-                total_sec_7d = max(0, int(diff_7d.total_seconds()))
-                days_7d = total_sec_7d // 86400
-                hours_7d = (total_sec_7d % 86400) // 3600
-                mins_7d = (total_sec_7d % 3600) // 60
-                if days_7d > 0:
-                    reset_time_7d = f"{days_7d}d{hours_7d:02d}h"
-                elif hours_7d > 0:
-                    reset_time_7d = f"{hours_7d}h{mins_7d:02d}m"
-                else:
-                    reset_time_7d = f"{mins_7d}m"
+                # Show actual expiry day + time instead of countdown
+                expiry_dt_7d = datetime.fromtimestamp(resets_at_7d).astimezone()
+                reset_time_7d = expiry_dt_7d.strftime("%a %H:%M")
             else:
                 reset_time_7d = ""
 
@@ -826,7 +826,7 @@ def main(json_output: bool = False,
                     )
                 countdown = get_countdown_emoji(minutes_to_reset)
 
-                print(format_status_line(
+                line = format_status_line(
                     msgs_pct=msgs_pct, tkns_pct=None,
                     reset_time=reset_time, model=model,
                     weekly_pct=weekly_pct,
@@ -835,7 +835,8 @@ def main(json_output: bool = False,
                     pet_text=pet_text, countdown_emoji=countdown,
                     warning_threshold=warning_threshold,
                     critical_threshold=critical_threshold,
-                ))
+                )
+                print(_right_align(line))
         else:
             # No rate_limits yet — could be session start or old Claude Code
             model = display_name if display_name != 'Unknown' else model_id
